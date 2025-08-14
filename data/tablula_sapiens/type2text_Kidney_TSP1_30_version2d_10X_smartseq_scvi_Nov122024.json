@@ -1,0 +1,15 @@
+{
+    "natural killer cell": "cell type: natural killer cell. a lymphocyte that can spontaneously kill a variety of target cells without prior antigenic activation via germline encoded activation receptors and also regulate immune responses via cytokine release and direct contact with other cells.;",
+    "macrophage": "cell type: macrophage. a mononuclear phagocyte present in variety of tissues, typically differentiated from monocytes, capable of phagocytosing a variety of extracellular particulate material, including immune complexes, microorganisms, and dead cells.;",
+    "non-classical monocyte": "cell type: non-classical monocyte, a type of monocyte characterized by low expression of ccr2, low responsiveness to monocyte chemoattractant ccl2/mcp1, low ph decrease size relative to classical monocytes, but increased co-stimulatory activity. may also play a role in tissue repair.;",
+    "b cell": "cell type: b cell. a lymphocyte of b lineage that is capable of b cell mediated immunity.; ",
+    "plasma cell": "cell type: plasma cell. a terminally differentiated, post-mitotic, antibody secreting cell of the b cell lineage with the phenotype cd138-positive, …eus having a characteristic cartwheel heterochromatin pattern and are devoted to producing large amounts of immunoglobulin.;",
+    "cd8-positive, alpha-beta t cell": "cell type: cd8-positive, alpha-beta t cell. a t cell expressing an alpha-beta t cell receptor and the cd8 coreceptor.;",
+    "kidney epithelial cell": "cell type: kidney epithelial cell. an epithelial cell of the kidney.;",
+    "t cell": "cell type: t cell. a type of lymphocyte whose defining characteristic is the expression of a t cell receptor complex.;",
+    "intermediate monocyte": "cell type: intermediate monocyte. a monocyte that has characteristics of both patrolling and inflammatory monocytes.;",
+    "monocyte": "cell type: monocyte. myeloid mononuclear recirculating leukocyte that can act as a precursor of tissue macrophages, osteoclasts and some populations of tissue dendritic cells.;",
+    "neutrophil": "cell type: neutrophil. any of the immature or mature forms of a granular leukocyte that in its mature form has a nucleus with three to five lobes connected by slender threads of chromatin, and cytoplasm containing fine inconspicuous granules and stainable by neutral dyes.;",
+    "endothelial cell": "cell type: endothelial cell. an endothelial cell comprises the outermost layer or lining of anatomical structures and can be squamous or cuboidal. in mammals, endothelial cell has vimentin filaments and is derived from the mesoderm.;",
+    "cd4-positive, alpha-beta t cell": "cell type: cd4-positive, alpha-beta t cell. a mature alpha-beta t cell that expresses an alpha-beta t cell receptor and the cd4 coreceptor.;"
+}

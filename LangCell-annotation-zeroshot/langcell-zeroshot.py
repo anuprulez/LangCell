@@ -1,12 +1,16 @@
 
 import os
+import anndata
+import scanpy as sc
+import numpy as np
 #os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-from datasets import load_from_disk
+from datasets import load_from_disk, Dataset
 import torch.nn as nn, torch.nn.functional as F
 import torch, json
 from transformers import BertTokenizer, BertModel
 from utils import BertModel as MedBertModel
 from utils import LangCellDataCollatorForCellClassification as DataCollatorForCellClassification
+from utils import LangCellTranscriptomeTokenizer
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
@@ -68,19 +72,111 @@ def ctm(text, cell_emb, cell_atts):
     return logits
 
 def load_dataset(tokenizer, text_encoder):
-    dataset = load_from_disk("../data/data_zeroshot/pbmc10k.dataset")
-    dataset_sub = dataset.shuffle(seed=42)#.select(range(1000))
+    # TODO: Load AnnData
+    #dataset = load_from_disk("../data/data_zeroshot/pbmc10k.dataset")
+    #dataset_sub = dataset.shuffle(seed=42) #.select(range(1000))
+    #print(dataset_sub)
+    #print(len(dataset_sub["input_ids"]), dataset_sub["input_ids"][:5], dataset_sub["length"][:5], dataset_sub["filter_pass"][:5])
+    #print()
+    data_dir = "../data/tablula_sapiens/Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad"
+    dataset_sub = sc.read(data_dir)
+    print(dataset_sub)
+    print()
+    print(type(dataset_sub))
+
+    #sc.pp.filter_cells(dataset_sub, min_genes=200)
+    #sc.pp.filter_genes(dataset_sub, min_cells=3)
+    #sc.pp.normalize_total(dataset_sub, target_sum=1e4)
+
+    # Logarithmize data
+    #sc.pp.log1p(dataset_sub)
+
+    # Feature selection
+    #sc.pp.highly_variable_genes(dataset_sub, n_top_genes=500, min_mean=0.0125, max_mean=3, min_disp=0.5)
+    #dataset_sub = dataset_sub[:, dataset_sub.var.highly_variable]
+    #print("After filtering and normalization and feature selection")
+    print(dataset_sub)
+
+    #print(dataset_sub.var['ensembl_id'][:5])
+    #print("dataset_sub var mt")
+    #print(dataset_sub.var["mt"][:5])
+
+    sc.pp.calculate_qc_metrics(dataset_sub, qc_vars=["mt"], inplace=True)
+
+    dataset_sub.obs["filter_pass"] = (
+        (dataset_sub.obs["n_genes_by_counts"] >= 200) &
+        (dataset_sub.obs["n_genes_by_counts"] <= 6000) &
+        (dataset_sub.obs["total_counts"] <= 5e5) &
+        (dataset_sub.obs["pct_counts_mt"] <= 20)
+    ).astype(bool)
+
+    dataset_sub.obs['n_counts'] = dataset_sub.X.sum(axis=1)
+    #dataset_sub.var['feature_id'] = dataset_sub.var['ensembl_id']
+    dataset_sub.obs['labels'] = dataset_sub.obs['cell_ontology_class']
+    dataset_sub.obs['celltype'] = dataset_sub.obs['cell_ontology_class']
+    dataset_sub.obs['batch'] = dataset_sub.obs['_scvi_batch']
+    dataset_sub.obs['str_labels'] = dataset_sub.obs['cell_ontology_class']
+
+    tk = LangCellTranscriptomeTokenizer(dict([(k, k) for k in dataset_sub.obs.keys()]), nproc=4)
+    tokenized_cells, cell_metadata = tk.tokenize_anndata(dataset_sub)
+    tokenized_dataset = tk.create_dataset(tokenized_cells, cell_metadata)
+
+
+    print(tokenized_dataset)
+
+    print(tokenized_dataset.column_names)
+
+    print(tokenized_dataset["celltype"])
+
+    #tokenized_dataset.save_to_disk('/path/to/tokenized_dataset')
+
+    '''print(set(dataset_sub.obs['_scvi_labels']))
+    print("---")
+    print(set(dataset_sub.obs['cell_ontology_class']))
+    print("---")
+    print(set(dataset_sub.obs['free_annotation']))
+    print("---")
+    print(set(dataset_sub.obs['manually_annotated']))
+    print("---")
+    print(dataset_sub.X.shape)
+    print("---")
+
+    data_dict = {
+        "input_ids": dataset_sub.X,   # or keep as list of lists
+        "n_counts": dataset_sub.obs["total_counts"].astype(np.int64).tolist(),
+        "batch": dataset_sub.obs["_scvi_batch"].astype(str).tolist(),
+        "labels": dataset_sub.obs["cell_ontology_class"].astype(str).tolist(),
+        "str_labels": dataset_sub.obs["cell_ontology_class"].astype(str).tolist(),
+        "n_genes": dataset_sub.obs["n_genes_by_counts"].astype(np.int64).tolist(),
+        #"filter_pass": adata.obs["filter_pass"].astype(bool).tolist(),
+        #"length": adata.obs["length"].astype(np.int64).tolist(),
+    }
+
+    dataset_sub = Dataset.from_dict(data_dict)
+
+    print(dataset_sub)
+
+    print("---")'''
+
     for label_name in ["celltype", "cell_type", "str_labels", "labels"]:
-        if label_name in dataset_sub.column_names:
+        if label_name in tokenized_dataset.column_names:
             break
     if label_name != "celltype":
-        dataset_sub = dataset_sub.rename_column(label_name,"celltype")
-
-    print(set(dataset_sub['celltype']))
+        tokenized_dataset = tokenized_dataset.rename_column(label_name,"celltype")
 
     import json
-    types = list(set(dataset_sub['celltype']))
-    type2text = json.load(open('../data/data_zeroshot/type2text.json'))
+    types = list(set(tokenized_dataset['celltype']))
+
+    print(f"celltypes: {types}")
+
+    #import sys
+    #sys.exit()
+
+    #type2text = json.load(open('../data/data_zeroshot/type2text.json'))
+    type2text = json.load(open('../data/tablula_sapiens/type2text_Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.json'))
+
+    print(type2text)
+
     texts = [type2text[typename] for typename in types]
     with torch.no_grad():
         text_embs = torch.cat([text_encode(text, tokenizer, text_encoder) for text in texts], 0).T.cuda() # 256 * N
@@ -91,7 +187,7 @@ def load_dataset(tokenizer, text_encoder):
         example["label"] = type2num[example["celltype"]]
         return example
 
-    testdataset = dataset_sub.map(classes_to_ids, num_proc=16)
+    testdataset = tokenized_dataset.map(classes_to_ids, num_proc=16)
     remove_columns = testdataset.column_names
     remove_columns.remove('input_ids')
     remove_columns.remove('label')
@@ -99,7 +195,7 @@ def load_dataset(tokenizer, text_encoder):
     batchsize = 32
     collator = DataCollatorForCellClassification()
     dataloader = DataLoader(testdataset, batch_size=batchsize, collate_fn=collator, shuffle=False)
-    return dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, types
+    return tokenized_dataset, testdataset, texts, text_embs, dataloader, batchsize, types
 
 
 def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, types):
