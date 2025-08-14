@@ -1,8 +1,14 @@
 
 import os
-import anndata
 import scanpy as sc
+import anndata as ad
 import numpy as np
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import confusion_matrix, classification_report
+import scipy.sparse as sp
+import seaborn as sns
+import matplotlib.pyplot as plt
+import pandas as pd
 #os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 from datasets import load_from_disk, Dataset
 import torch.nn as nn, torch.nn.functional as F
@@ -71,21 +77,32 @@ def ctm(text, cell_emb, cell_atts):
     logits = F.softmax(logits, dim=-1)[..., 1] # [n]
     return logits
 
+def calculate_mean_max_min(adata, feature_name):
+    mean = np.mean(adata.obs[feature_name])
+    median = np.median(adata.obs[feature_name])
+    max_val = np.max(adata.obs[feature_name])
+    min_val = np.min(adata.obs[feature_name])
+    return mean, median, max_val, min_val
+
 def load_dataset(tokenizer, text_encoder):
     # TODO: Load AnnData
     #dataset = load_from_disk("../data/data_zeroshot/pbmc10k.dataset")
-    #dataset_sub = dataset.shuffle(seed=42) #.select(range(1000))
-    #print(dataset_sub)
-    #print(len(dataset_sub["input_ids"]), dataset_sub["input_ids"][:5], dataset_sub["length"][:5], dataset_sub["filter_pass"][:5])
+    #tokenized_dataset = dataset.shuffle(seed=42) #.select(range(1000))
+    #print(tokenized_dataset.column_names)
+    #print(tokenized_dataset["labels"][:5], list(set(tokenized_dataset["labels"])))
+    #print(len(tokenized_dataset["input_ids"]), len(tokenized_dataset["input_ids"][0]), len(tokenized_dataset["input_ids"][1]), tokenized_dataset["str_labels"][:5], tokenized_dataset["length"][:5], tokenized_dataset["filter_pass"][:5])
+    #print(tokenized_dataset["n_counts"][:5], tokenized_dataset["n_genes"][:5], tokenized_dataset["str_labels"][:5], list(set(tokenized_dataset["str_labels"])))
+
+    #print("--------- END of Default data -----------------------")
     #print()
+
+
     data_dir = "../data/tablula_sapiens/Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad"
     dataset_sub = sc.read(data_dir)
     print(dataset_sub)
-    print()
-    print(type(dataset_sub))
+    #print()
+    
 
-    #sc.pp.filter_cells(dataset_sub, min_genes=200)
-    #sc.pp.filter_genes(dataset_sub, min_cells=3)
     #sc.pp.normalize_total(dataset_sub, target_sum=1e4)
 
     # Logarithmize data
@@ -95,13 +112,23 @@ def load_dataset(tokenizer, text_encoder):
     #sc.pp.highly_variable_genes(dataset_sub, n_top_genes=500, min_mean=0.0125, max_mean=3, min_disp=0.5)
     #dataset_sub = dataset_sub[:, dataset_sub.var.highly_variable]
     #print("After filtering and normalization and feature selection")
-    print(dataset_sub)
+    #print(tokenized_dataset)
 
     #print(dataset_sub.var['ensembl_id'][:5])
     #print("dataset_sub var mt")
     #print(dataset_sub.var["mt"][:5])
 
+    sc.pp.filter_cells(dataset_sub, min_genes=200)
+    sc.pp.filter_genes(dataset_sub, min_cells=3)
+    sc.pp.highly_variable_genes(dataset_sub, n_top_genes=3000)
+    dataset_sub = dataset_sub[:, dataset_sub.var.highly_variable]
     sc.pp.calculate_qc_metrics(dataset_sub, qc_vars=["mt"], inplace=True)
+
+    print(dataset_sub)
+
+    print(f"n_genes_by_counts (mean, med, max, min): {calculate_mean_max_min(dataset_sub, 'n_genes_by_counts')}")
+    print(f"total_counts (mean, med, max, min): {calculate_mean_max_min(dataset_sub, 'total_counts')}")
+    print(f"pct_counts_mt (mean, med, max, min): {calculate_mean_max_min(dataset_sub, 'pct_counts_mt')}")
 
     dataset_sub.obs["filter_pass"] = (
         (dataset_sub.obs["n_genes_by_counts"] >= 200) &
@@ -110,72 +137,73 @@ def load_dataset(tokenizer, text_encoder):
         (dataset_sub.obs["pct_counts_mt"] <= 20)
     ).astype(bool)
 
-    dataset_sub.obs['n_counts'] = dataset_sub.X.sum(axis=1)
-    #dataset_sub.var['feature_id'] = dataset_sub.var['ensembl_id']
-    dataset_sub.obs['labels'] = dataset_sub.obs['cell_ontology_class']
-    dataset_sub.obs['celltype'] = dataset_sub.obs['cell_ontology_class']
+    le = LabelEncoder()
     dataset_sub.obs['batch'] = dataset_sub.obs['_scvi_batch']
     dataset_sub.obs['str_labels'] = dataset_sub.obs['cell_ontology_class']
+    dataset_sub.obs['celltype'] = dataset_sub.obs['cell_ontology_class']
+    dataset_sub.obs['labels'] = le.fit_transform(dataset_sub.obs['str_labels'])
+    label_mapping = dict(zip(le.classes_, le.transform(le.classes_)))
+    print("Mapping:", label_mapping)
+    dataset_sub.obs['n_counts'] = np.asarray(dataset_sub.X.sum(axis=1)).ravel() #dataset_sub.X.sum(axis=1)
+
+    print(f"Gene symbol: {dataset_sub.var['gene_symbol'][:50]}")
+    print(f"Ensemble id: {dataset_sub.var['ensembl_id'][:50]}")
+
+    f_ensembl_ids = dataset_sub.var['ensembl_id'].str.replace(r'\.\d+$','', regex=True)
+
+    print(f"Formatted Ensemble id: {f_ensembl_ids[:50]}")
+    
+    dataset_sub.var['feature_id'] = f_ensembl_ids #dataset_sub.var['gene_symbol']
+    dataset_sub.var['ensembl_id'] = f_ensembl_ids #dataset_sub.var['gene_symbol']
+
+    print(f"sp.issparse(dataset_sub.X): {str(sp.issparse(dataset_sub.X))}")
+    if sp.issparse(dataset_sub.X):
+        n_counts = np.asarray(dataset_sub.X.sum(axis=1)).ravel()
+        n_genes  = dataset_sub.X.getnnz(axis=1)
+    else:
+        n_counts = dataset_sub.X.sum(axis=1)
+        n_genes  = (dataset_sub.X > 0).sum(axis=1)
+
+    dataset_sub.obs["n_genes"]  = np.asarray(n_genes, dtype=np.int32)
 
     tk = LangCellTranscriptomeTokenizer(dict([(k, k) for k in dataset_sub.obs.keys()]), nproc=4)
     tokenized_cells, cell_metadata = tk.tokenize_anndata(dataset_sub)
     tokenized_dataset = tk.create_dataset(tokenized_cells, cell_metadata)
 
-
     print(tokenized_dataset)
 
     print(tokenized_dataset.column_names)
 
-    print(tokenized_dataset["celltype"])
+    print(list(set(tokenized_dataset["celltype"])))
 
-    #tokenized_dataset.save_to_disk('/path/to/tokenized_dataset')
+    tokenized_dataset.save_to_disk('../data/tabula_sapiens/Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.tokenized_dataset')
 
-    '''print(set(dataset_sub.obs['_scvi_labels']))
-    print("---")
-    print(set(dataset_sub.obs['cell_ontology_class']))
-    print("---")
-    print(set(dataset_sub.obs['free_annotation']))
-    print("---")
-    print(set(dataset_sub.obs['manually_annotated']))
-    print("---")
-    print(dataset_sub.X.shape)
-    print("---")
+    print("-----------------Newly created tokenized dataset ----------------------")
+    print(tokenized_dataset.column_names)
+    print(tokenized_dataset["labels"][:5], list(set(tokenized_dataset["labels"])))
+    print(len(tokenized_dataset["input_ids"]), len(tokenized_dataset["input_ids"][0]), len(tokenized_dataset["input_ids"][1]), tokenized_dataset["str_labels"][:5], tokenized_dataset["length"][:5], tokenized_dataset["filter_pass"][:5])
+    print(tokenized_dataset["n_counts"][:5], tokenized_dataset["n_genes"][:5], tokenized_dataset["str_labels"][:5], list(set(tokenized_dataset["str_labels"])))
 
-    data_dict = {
-        "input_ids": dataset_sub.X,   # or keep as list of lists
-        "n_counts": dataset_sub.obs["total_counts"].astype(np.int64).tolist(),
-        "batch": dataset_sub.obs["_scvi_batch"].astype(str).tolist(),
-        "labels": dataset_sub.obs["cell_ontology_class"].astype(str).tolist(),
-        "str_labels": dataset_sub.obs["cell_ontology_class"].astype(str).tolist(),
-        "n_genes": dataset_sub.obs["n_genes_by_counts"].astype(np.int64).tolist(),
-        #"filter_pass": adata.obs["filter_pass"].astype(bool).tolist(),
-        #"length": adata.obs["length"].astype(np.int64).tolist(),
-    }
-
-    dataset_sub = Dataset.from_dict(data_dict)
-
-    print(dataset_sub)
-
-    print("---")'''
 
     for label_name in ["celltype", "cell_type", "str_labels", "labels"]:
         if label_name in tokenized_dataset.column_names:
             break
+    print(f"label_name: {label_name}")
     if label_name != "celltype":
         tokenized_dataset = tokenized_dataset.rename_column(label_name,"celltype")
 
-    import json
     types = list(set(tokenized_dataset['celltype']))
 
     print(f"celltypes: {types}")
-
-    #import sys
-    #sys.exit()
+    print(f"labels: {list(set(tokenized_dataset['labels']))}")
 
     #type2text = json.load(open('../data/data_zeroshot/type2text.json'))
     type2text = json.load(open('../data/tablula_sapiens/type2text_Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.json'))
 
     print(type2text)
+
+    #import sys
+    #sys.exit()
 
     texts = [type2text[typename] for typename in types]
     with torch.no_grad():
@@ -233,8 +261,6 @@ def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, t
         #             'preds': preds, 'labels': labels, 'logits': logits}, 
         #            'data/results.pt')
 
-    from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score, average_precision_score
-    import numpy as np
     sim_preds = sim_logits.argmax(dim=-1)
     ctm_preds = ctm_logits.argmax(dim=-1)
     alpha = 0.1
@@ -243,32 +269,40 @@ def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, t
     for row in confusion_matrix(labels, preds):
         print('\t'.join([str(x) for x in row]))
     print(classification_report(labels, preds, digits=4))
-
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    import numpy as np
-    from sklearn.metrics import confusion_matrix
-    import matplotlib.pyplot as plt
-
-    def plot_confusion_matrix(y_true, y_pred, classes, normalize=False, title=None, cmap=plt.cm.Blues):
-        if not title:
-            if normalize:
-                title = 'Normalized confusion matrix'
-            else:
-                title = 'Confusion matrix, without normalization'
-        cm = confusion_matrix(y_true, y_pred)
-        if normalize:
-            cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        df_cm = pd.DataFrame(cm, index=classes, columns=classes)
-        plt.figure(figsize=(10, 7))
-        sns.heatmap(df_cm, annot=False, cmap=cmap)
-        plt.title(title)
-        plt.ylabel('True label')
-        plt.xlabel('Predicted label')
-        plt.show()
-
     plot_confusion_matrix(labels, preds, types, normalize=True)
+
+    # Plot UMAP
+    plt.tight_layout()
+    cell_embs_ad = ad.AnnData(cell_embs.numpy())
+    cell_embs_ad.obs['celltype'] = dataset_sub['celltype']
+    if 'batch' in dataset_sub.features.keys():
+        cell_embs_ad.obs['batch'] = dataset_sub['batch']
+        cell_embs_ad.obs['batch'] = cell_embs_ad.obs['batch'].astype(str)
+    cell_embs_ad.obs['predictions'] = [types[i] for i in preds]
+    sc.pp.neighbors(cell_embs_ad, use_rep='X', n_neighbors=80)
+    sc.tl.umap(cell_embs_ad)
+    sc.pl.umap(cell_embs_ad, color=['celltype', 'predictions', 'batch'], legend_fontsize ='xx-small', size=5, legend_fontweight='light')
+    plt.savefig("../data/umap_plot.png", dpi=300, bbox_inches='tight')
+    plt.close()
+
+def plot_confusion_matrix(y_true, y_pred, classes, normalize=False, title=None, cmap=plt.cm.Blues):
+    if not title:
+        if normalize:
+            title = 'Normalized confusion matrix'
+        else:
+            title = 'Confusion matrix, without normalization'
+    cm = confusion_matrix(y_true, y_pred)
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+    df_cm = pd.DataFrame(cm, index=classes, columns=classes)
+    plt.figure(figsize=(10, 7))
+    sns.heatmap(df_cm, annot=False, cmap=cmap)
+    plt.title(title)
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    #plt.show()
+    plt.tight_layout()
+    plt.savefig('../data/confusion_matrix.png', dpi=300)
 
 
 if __name__ == "__main__":
