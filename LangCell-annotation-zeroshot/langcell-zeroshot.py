@@ -97,11 +97,12 @@ def load_dataset(tokenizer, text_encoder):
     #print()
 
 
-    data_dir = "../data/tablula_sapiens/Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad"
+    #data_dir = "../data/tablula_sapiens/Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad"
+    data_dir = "../data/tablula_sapiens_datasets/Heart_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad"
     dataset_sub = sc.read(data_dir)
     print(dataset_sub)
     #print()
-    
+    name_without_ext = os.path.splitext(os.path.basename(data_dir))[0]
 
     #sc.pp.normalize_total(dataset_sub, target_sum=1e4)
 
@@ -118,11 +119,11 @@ def load_dataset(tokenizer, text_encoder):
     #print("dataset_sub var mt")
     #print(dataset_sub.var["mt"][:5])
 
-    sc.pp.filter_cells(dataset_sub, min_genes=200)
-    sc.pp.filter_genes(dataset_sub, min_cells=3)
-    sc.pp.highly_variable_genes(dataset_sub, n_top_genes=3000)
-    dataset_sub = dataset_sub[:, dataset_sub.var.highly_variable]
-    sc.pp.calculate_qc_metrics(dataset_sub, qc_vars=["mt"], inplace=True)
+    #sc.pp.filter_cells(dataset_sub, min_genes=200)
+    #sc.pp.filter_genes(dataset_sub, min_cells=200)
+    sc.pp.highly_variable_genes(dataset_sub, n_top_genes=500)
+    #dataset_sub = dataset_sub[:, dataset_sub.var.highly_variable]
+    #sc.pp.calculate_qc_metrics(dataset_sub, qc_vars=["mt"], inplace=True)
 
     print(dataset_sub)
 
@@ -131,10 +132,10 @@ def load_dataset(tokenizer, text_encoder):
     print(f"pct_counts_mt (mean, med, max, min): {calculate_mean_max_min(dataset_sub, 'pct_counts_mt')}")
 
     dataset_sub.obs["filter_pass"] = (
-        (dataset_sub.obs["n_genes_by_counts"] >= 200) &
-        (dataset_sub.obs["n_genes_by_counts"] <= 6000) &
-        (dataset_sub.obs["total_counts"] <= 5e5) &
-        (dataset_sub.obs["pct_counts_mt"] <= 20)
+        (dataset_sub.obs["n_genes_by_counts"] >= 200)
+        #(dataset_sub.obs["n_genes_by_counts"] <= 10000) &
+        #(dataset_sub.obs["total_counts"] <= 5e5) &
+        #(dataset_sub.obs["pct_counts_mt"] <= 30)
     ).astype(bool)
 
     le = LabelEncoder()
@@ -173,10 +174,13 @@ def load_dataset(tokenizer, text_encoder):
     print(tokenized_dataset)
 
     print(tokenized_dataset.column_names)
-
+    print("------------------")
+    print("All labels")
+    print(list(set(dataset_sub.obs['str_labels'])))
+    print("------------------")
     print(list(set(tokenized_dataset["celltype"])))
 
-    tokenized_dataset.save_to_disk('../data/tabula_sapiens/Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.tokenized_dataset')
+    tokenized_dataset.save_to_disk(f'../data/tabula_sapiens/{name_without_ext}.tokenized_dataset')
 
     print("-----------------Newly created tokenized dataset ----------------------")
     print(tokenized_dataset.column_names)
@@ -197,8 +201,11 @@ def load_dataset(tokenizer, text_encoder):
     print(f"celltypes: {types}")
     print(f"labels: {list(set(tokenized_dataset['labels']))}")
 
+    #import sys
+    #sys.exit()
+
     #type2text = json.load(open('../data/data_zeroshot/type2text.json'))
-    type2text = json.load(open('../data/tablula_sapiens/type2text_Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.json'))
+    type2text = json.load(open(f'../data/tablula_sapiens_datasets/type2text_{name_without_ext}.json'))
 
     print(type2text)
 
@@ -220,13 +227,13 @@ def load_dataset(tokenizer, text_encoder):
     remove_columns.remove('input_ids')
     remove_columns.remove('label')
     testdataset = testdataset.remove_columns(remove_columns)
-    batchsize = 32
+    batchsize = 64 #32
     collator = DataCollatorForCellClassification()
     dataloader = DataLoader(testdataset, batch_size=batchsize, collate_fn=collator, shuffle=False)
-    return tokenized_dataset, testdataset, texts, text_embs, dataloader, batchsize, types
+    return tokenized_dataset, testdataset, texts, text_embs, dataloader, batchsize, types, name_without_ext
 
 
-def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, types):
+def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, types, file_name):
     cell_embs = torch.zeros(len(dataset_sub), 256)
     model.eval()
     text_encoder.eval()
@@ -269,7 +276,8 @@ def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, t
     for row in confusion_matrix(labels, preds):
         print('\t'.join([str(x) for x in row]))
     print(classification_report(labels, preds, digits=4))
-    plot_confusion_matrix(labels, preds, types, normalize=True)
+    organ_name = file_name.split('_')[0]
+    plot_confusion_matrix(labels, preds, types, title=f"Confusion matrix for celltypes of {organ_name}", normalize=True)
 
     # Plot UMAP
     plt.tight_layout()
@@ -308,6 +316,6 @@ def plot_confusion_matrix(y_true, y_pred, classes, normalize=False, title=None, 
 if __name__ == "__main__":
     tokenizer, model, text_encoder, ctm_head = load_model()
     print("Loading model finished.")
-    dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, types = load_dataset(tokenizer, text_encoder)
+    dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, types, file_name = load_dataset(tokenizer, text_encoder)
     print("Loading dataset finished.")
-    predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, types)
+    predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, types, file_name)
