@@ -97,8 +97,8 @@ def load_dataset(tokenizer, text_encoder):
     #print()
 
 
-    #data_dir = "../data/tablula_sapiens/Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad"
-    data_dir = "../data/tablula_sapiens_datasets/Heart_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad"
+    data_dir = "../data/tablula_sapiens/Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad"
+    #data_dir = "../data/tablula_sapiens_datasets/Heart_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad"
     dataset_sub = sc.read(data_dir)
     print(dataset_sub)
     #print()
@@ -121,7 +121,7 @@ def load_dataset(tokenizer, text_encoder):
 
     #sc.pp.filter_cells(dataset_sub, min_genes=200)
     #sc.pp.filter_genes(dataset_sub, min_cells=200)
-    sc.pp.highly_variable_genes(dataset_sub, n_top_genes=500)
+    #sc.pp.highly_variable_genes(dataset_sub, n_top_genes=500)
     #dataset_sub = dataset_sub[:, dataset_sub.var.highly_variable]
     #sc.pp.calculate_qc_metrics(dataset_sub, qc_vars=["mt"], inplace=True)
 
@@ -227,7 +227,7 @@ def load_dataset(tokenizer, text_encoder):
     remove_columns.remove('input_ids')
     remove_columns.remove('label')
     testdataset = testdataset.remove_columns(remove_columns)
-    batchsize = 64 #32
+    batchsize = 32 #32
     collator = DataCollatorForCellClassification()
     dataloader = DataLoader(testdataset, batch_size=batchsize, collate_fn=collator, shuffle=False)
     return tokenized_dataset, testdataset, texts, text_embs, dataloader, batchsize, types, name_without_ext
@@ -277,7 +277,7 @@ def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, t
         print('\t'.join([str(x) for x in row]))
     print(classification_report(labels, preds, digits=4))
     organ_name = file_name.split('_')[0]
-    plot_confusion_matrix(labels, preds, types, title=f"Confusion matrix for celltypes of {organ_name}", normalize=True)
+    plot_confusion_matrix(labels, preds, types, title=f"Confusion matrix for celltypes of {organ_name}", normalize=True, file_n=file_name)
 
     # Plot UMAP
     plt.tight_layout()
@@ -290,10 +290,10 @@ def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, t
     sc.pp.neighbors(cell_embs_ad, use_rep='X', n_neighbors=80)
     sc.tl.umap(cell_embs_ad)
     sc.pl.umap(cell_embs_ad, color=['celltype', 'predictions', 'batch'], legend_fontsize ='xx-small', size=5, legend_fontweight='light')
-    plt.savefig("../data/umap_plot.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"../data/umap_plot_{file_name}.png", dpi=300, bbox_inches='tight')
     plt.close()
 
-def plot_confusion_matrix(y_true, y_pred, classes, normalize=False, title=None, cmap=plt.cm.Blues):
+def plot_confusion_matrix(y_true, y_pred, classes, normalize=False, title=None, cmap=plt.cm.Blues, file_n=None):
     if not title:
         if normalize:
             title = 'Normalized confusion matrix'
@@ -310,7 +310,7 @@ def plot_confusion_matrix(y_true, y_pred, classes, normalize=False, title=None, 
     plt.xlabel('Predicted label')
     #plt.show()
     plt.tight_layout()
-    plt.savefig('../data/confusion_matrix.png', dpi=300)
+    plt.savefig(f'../data/confusion_matrix_{file_n}.png', dpi=300)
 
 
 if __name__ == "__main__":
