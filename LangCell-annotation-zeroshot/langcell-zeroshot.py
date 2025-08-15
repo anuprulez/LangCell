@@ -20,6 +20,9 @@ from utils import LangCellTranscriptomeTokenizer
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
+
+n_top_genes = 200
+
 class Pooler(nn.Module):
     def __init__(self, config, pretrained_proj, proj_dim):
         super().__init__()
@@ -121,8 +124,10 @@ def load_dataset(tokenizer, text_encoder):
 
     #sc.pp.filter_cells(dataset_sub, min_genes=200)
     #sc.pp.filter_genes(dataset_sub, min_cells=200)
-    #sc.pp.highly_variable_genes(dataset_sub, n_top_genes=500)
-    #dataset_sub = dataset_sub[:, dataset_sub.var.highly_variable]
+
+    sc.pp.highly_variable_genes(dataset_sub, n_top_genes=n_top_genes)
+    dataset_sub = dataset_sub[:, dataset_sub.var.highly_variable]
+
     #sc.pp.calculate_qc_metrics(dataset_sub, qc_vars=["mt"], inplace=True)
 
     print(dataset_sub)
@@ -234,6 +239,7 @@ def load_dataset(tokenizer, text_encoder):
 
 
 def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, types, file_name):
+    mode = "zero_shot"
     cell_embs = torch.zeros(len(dataset_sub), 256)
     model.eval()
     text_encoder.eval()
@@ -277,7 +283,8 @@ def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, t
         print('\t'.join([str(x) for x in row]))
     print(classification_report(labels, preds, digits=4))
     organ_name = file_name.split('_')[0]
-    plot_confusion_matrix(labels, preds, types, title=f"Confusion matrix for celltypes of {organ_name}", normalize=True, file_n=file_name)
+    plot_confusion_matrix(labels, preds, types, title=f"Confusion matrix for celltypes of {organ_name}", normalize=True, \
+                          file_n=file_name, mode=mode)
 
     # Plot UMAP
     plt.tight_layout()
@@ -290,10 +297,10 @@ def predict(dataset_sub, testdataset, texts, text_embs, dataloader, batchsize, t
     sc.pp.neighbors(cell_embs_ad, use_rep='X', n_neighbors=80)
     sc.tl.umap(cell_embs_ad)
     sc.pl.umap(cell_embs_ad, color=['celltype', 'predictions', 'batch'], legend_fontsize ='xx-small', size=5, legend_fontweight='light')
-    plt.savefig(f"../data/umap_plot_{file_name}.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"../data/umap_plot_{file_name}_{mode}.png", dpi=300, bbox_inches='tight')
     plt.close()
 
-def plot_confusion_matrix(y_true, y_pred, classes, normalize=False, title=None, cmap=plt.cm.Blues, file_n=None):
+def plot_confusion_matrix(y_true, y_pred, classes, normalize=False, title=None, cmap=plt.cm.Blues, file_n=None, mode=None):
     if not title:
         if normalize:
             title = 'Normalized confusion matrix'
@@ -310,7 +317,7 @@ def plot_confusion_matrix(y_true, y_pred, classes, normalize=False, title=None, 
     plt.xlabel('Predicted label')
     #plt.show()
     plt.tight_layout()
-    plt.savefig(f'../data/confusion_matrix_{file_n}.png', dpi=300)
+    plt.savefig(f'../data/confusion_matrix_{file_n}_{mode}.png', dpi=300)
 
 
 if __name__ == "__main__":
